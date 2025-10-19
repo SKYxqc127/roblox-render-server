@@ -13,7 +13,7 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-// สร้างตารางอัตโนมัติ
+// ✅ สร้างตารางอัตโนมัติทั้งหมด
 async function initTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bank_data (
@@ -42,10 +42,12 @@ async function initTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS player_data (
       user_id BIGINT PRIMARY KEY,
+      username TEXT,
       data JSONB,
       updated_at TIMESTAMP DEFAULT NOW()
     );
   `);
+
   console.log("✅ All tables initialized successfully");
 }
 initTables();
@@ -128,15 +130,8 @@ app.get("/load/customize/:userId", async (req, res) => {
 
 //
 // ========================
-// 🟢 Test Endpoint
-// ========================
-app.get("/", (req, res) => {
-  res.send("✅ Roblox Render Server (Bank + Customize) running!");
-});
-
-// =========================
 // 📍 Player Position + Health System
-// =========================
+// ========================
 app.post("/save/position", async (req, res) => {
   const auth = req.headers.authorization;
   if (auth !== `Bearer ${SECRET_KEY}`)
@@ -147,16 +142,6 @@ app.post("/save/position", async (req, res) => {
     return res.status(400).json({ error: "Missing data" });
 
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS position_data (
-        user_id BIGINT PRIMARY KEY,
-        x FLOAT,
-        y FLOAT,
-        z FLOAT,
-        health FLOAT DEFAULT 100
-      );
-    `);
-
     await pool.query(
       `INSERT INTO position_data (user_id, x, y, z, health)
        VALUES ($1, $2, $3, $4, $5)
@@ -184,6 +169,7 @@ app.get("/load/position/:userId", async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
+
 //
 // ========================
 // 💾 Player Data System (Render + Roblox Hybrid)
@@ -193,28 +179,20 @@ app.post("/save/playerdata", async (req, res) => {
   if (auth !== `Bearer ${SECRET_KEY}`)
     return res.status(403).json({ error: "Forbidden" });
 
-  const { userId, data, timestamp } = req.body;
+  const { userId, username, data } = req.body;
   if (!userId || !data)
     return res.status(400).json({ error: "Missing data" });
 
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS player_data (
-        user_id BIGINT PRIMARY KEY,
-        data JSONB,
-        updated_at TIMESTAMP DEFAULT NOW()
-      );
-    `);
-
     await pool.query(
-      `INSERT INTO player_data (user_id, data, updated_at)
-       VALUES ($1, $2, NOW())
+      `INSERT INTO player_data (user_id, username, data, updated_at)
+       VALUES ($1, $2, $3, NOW())
        ON CONFLICT (user_id)
-       DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at;`,
-      [userId, data]
+       DO UPDATE SET username = EXCLUDED.username, data = EXCLUDED.data, updated_at = NOW();`,
+      [userId, username || "Unknown", data]
     );
 
-    console.log(`[PLAYER DATA SAVE] ${userId} (${Object.keys(data).length} sections)`);
+    console.log(`[PLAYER DATA SAVE] ${username || "Unknown"} (${userId}) (${Object.keys(data).length} sections)`);
     res.json({ ok: true });
   } catch (err) {
     console.error("[PLAYER DATA ERROR]", err);
@@ -225,13 +203,37 @@ app.post("/save/playerdata", async (req, res) => {
 app.get("/load/playerdata/:userId", async (req, res) => {
   const userId = req.params.userId;
   try {
-    const result = await pool.query("SELECT data FROM player_data WHERE user_id=$1", [userId]);
-    if (result.rows.length > 0) res.json(result.rows[0].data);
+    const result = await pool.query("SELECT username, data FROM player_data WHERE user_id=$1", [userId]);
+    if (result.rows.length > 0) res.json(result.rows[0]);
     else res.json({});
   } catch (err) {
     console.error("[PLAYER DATA LOAD ERROR]", err);
     res.status(500).json({ error: "Database error" });
   }
+});
+
+//
+// ========================
+// 🧩 Debug Endpoint – ดูข้อมูลผู้เล่น
+// ========================
+app.get("/debug/playerdata", async (req, res) => {
+  try {
+    const result = await pool.query(
+      "SELECT user_id, username, updated_at, data FROM player_data ORDER BY updated_at DESC LIMIT 20;"
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error("[DEBUG ERROR]", err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+//
+// ========================
+// 🟢 Server Start
+// ========================
+app.get("/", (req, res) => {
+  res.send("✅ Roblox Render Server (Bank + Customize + PlayerData + Position) running!");
 });
 
 app.listen(3000, () => console.log("✅ Server running on port 3000"));
