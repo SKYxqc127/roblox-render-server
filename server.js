@@ -7,13 +7,13 @@ app.use(express.json());
 
 const SECRET_KEY = "MySecretKey123";
 
-// เชื่อม PostgreSQL
+// ✅ เชื่อมต่อ PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
 
-// ✅ สร้างตารางอัตโนมัติทั้งหมด
+// ✅ สร้างตาราง + อัปเดต column อัตโนมัติ
 async function initTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bank_data (
@@ -42,13 +42,15 @@ async function initTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS player_data (
       user_id BIGINT PRIMARY KEY,
-      username TEXT,
       data JSONB,
       updated_at TIMESTAMP DEFAULT NOW()
     );
   `);
 
-  console.log("✅ All tables initialized successfully");
+  // ✅ เพิ่มคอลัมน์ username หากยังไม่มี
+  await pool.query(`ALTER TABLE player_data ADD COLUMN IF NOT EXISTS username TEXT;`);
+
+  console.log("✅ All tables initialized and schema updated successfully");
 }
 initTables();
 
