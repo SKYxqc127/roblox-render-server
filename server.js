@@ -1,319 +1,121 @@
-import express from "express";
-import pkg from "pg";
-import cookieParser from "cookie-parser";
-const { Pool } = pkg;
-
-const app = express();
-app.use(express.json());
-app.use(cookieParser());
-
-const SECRET_KEY = "MySecretKey123"; // ใช้ฝั่ง Roblox
-const ADMIN_PASSWORD = "FujiTownAdmin123"; // ✅ รหัสผ่านสำหรับเข้า Dashboard
-const ADMIN_TOKEN = "FujiToken@2025"; // Token สำหรับ cookie
-
-// ✅ PostgreSQL Database
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
-
-// ✅ Auto-create Table
-async function initTables() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS player_data (
-      user_id BIGINT PRIMARY KEY,
-      username TEXT,
-      data JSONB,
-      updated_at TIMESTAMP DEFAULT NOW()
-    );
-  `);
-  console.log("✅ player_data table ready!");
-}
-initTables();
-
-//
 // ==========================
-// 💾 API สำหรับ Roblox
+// 📄 Player Detail (Simplified View)
 // ==========================
-app.post("/save/playerdata", async (req, res) => {
-  const auth = req.headers.authorization;
-  if (auth !== `Bearer ${SECRET_KEY}`)
-    return res.status(403).json({ error: "Forbidden" });
-
-  const { userId, username, data } = req.body;
-  if (!userId || !data)
-    return res.status(400).json({ error: "Missing data" });
-
-  try {
-    await pool.query(
-      `INSERT INTO player_data (user_id, username, data, updated_at)
-       VALUES ($1, $2, $3, NOW())
-       ON CONFLICT (user_id)
-       DO UPDATE SET username = EXCLUDED.username, data = EXCLUDED.data, updated_at = NOW();`,
-      [userId, username || "Unknown", data]
-    );
-    console.log(`[PLAYER DATA SAVE] ${username || "Unknown"} (${userId})`);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("[PLAYER DATA ERROR]", err);
-    res.status(500).json({ error: "Database error" });
-  }
-});
-
-app.get("/debug/playerdata", async (req, res) => {
-  try {
-    const result = await pool.query(
-      "SELECT user_id, username, updated_at, data FROM player_data ORDER BY updated_at DESC LIMIT 100;"
-    );
-    res.json(result.rows);
-  } catch (err) {
-    console.error("[DEBUG ERROR]", err);
-    res.status(500).json({ error: "Database error" });
-  }
-});
-
-//
-// ==========================
-// 🔐 ระบบล็อกอินแอดมิน
-// ==========================
-app.get("/login", (req, res) => {
-  res.send(`
-  <!DOCTYPE html>
+app.get("/admin/player/:userId", requireAdmin, (_req, res) => {
+  res.send(/* html */`
+  <!doctype html>
   <html lang="th">
   <head>
-    <meta charset="UTF-8">
-    <title>Admin Login</title>
+    <meta charset="utf-8"/>
+    <title>Player Detail</title>
     <style>
-      body {
-        background: #0f172a;
-        color: white;
-        font-family: 'Segoe UI', sans-serif;
-        display: flex;
-        justify-content: center;
-        align-items: center;
-        height: 100vh;
-      }
-      .box {
-        background: #1e293b;
-        padding: 30px;
-        border-radius: 12px;
-        box-shadow: 0 0 15px #0ea5e9;
-        text-align: center;
-      }
-      input {
-        padding: 10px;
-        width: 200px;
-        border-radius: 8px;
-        border: none;
-        outline: none;
-        margin-top: 10px;
-      }
-      button {
-        background: #0ea5e9;
-        border: none;
-        color: white;
-        padding: 10px 20px;
-        border-radius: 8px;
-        cursor: pointer;
-        margin-top: 15px;
-      }
-      button:hover { background: #0284c7; }
-      .error { color: #f87171; margin-top: 10px; }
+      :root { color-scheme: dark; }
+      body{margin:0;background:#0a0f1f;color:#e2e8f0;font-family:ui-sans-serif,system-ui,Segoe UI,Roboto}
+      header{position:sticky;top:0;background:linear-gradient(180deg,#0a0f1f,rgba(10,15,31,.7));backdrop-filter:blur(6px);z-index:10;padding:12px 16px;border-bottom:1px solid #102242;display:flex;gap:10px;align-items:center}
+      h1{font-size:18px;margin:0;color:#a5e1ff}
+      .spacer{flex:1}
+      .btn{background:#0ea5e9;border:none;color:#fff;padding:8px 12px;border-radius:8px;cursor:pointer}
+      .btn.red{background:#ef4444}
+      .container{max-width:1000px;margin:16px auto;padding:0 16px}
+      .panel{background:#0f172a;border:1px solid #15223d;border-radius:14px;box-shadow:0 0 18px rgba(2,132,199,.18);padding:16px;margin-bottom:20px}
+      .title{font-weight:700;color:#93c5fd;margin-bottom:10px}
+      .row{display:flex;justify-content:space-between;margin:4px 0;color:#cbd5e1;font-size:14px}
+      .avatar{width:140px;height:140px;border-radius:50%;display:block;margin:0 auto 10px;background:#0b1220}
+      .mono{font-family: ui-monospace, SFMono-Regular, Menlo, monospace;}
+      .small{font-size:12px;color:#9fb2cc}
+      .pill{display:inline-block;background:#0b1220;border:1px solid #1a2748;border-radius:999px;padding:4px 8px;font-size:12px;color:#a5b4fc}
     </style>
   </head>
   <body>
-    <div class="box">
-      <h2>🔐 Admin Login</h2>
-      <input id="password" type="password" placeholder="Enter Admin Password"><br>
-      <button onclick="login()">Login</button>
-      <div class="error" id="error"></div>
+    <header>
+      <button class="btn" onclick="history.back()">← Back</button>
+      <h1 id="head">Player</h1>
+      <div class="spacer"></div>
+      <button class="btn red" onclick="location.href='/admin/logout'">Logout</button>
+    </header>
+
+    <div class="container">
+      <div class="panel">
+        <img id="avatar" class="avatar" src="" alt="avatar"/>
+        <div class="title" id="pname">Unknown</div>
+        <div class="small mono" id="pid"></div>
+        <div class="small" id="updated"></div>
+      </div>
+
+      <div class="panel">
+        <div class="title">ID</div>
+        <div id="idblock" class="mono small">-</div>
+      </div>
+
+      <div class="panel">
+        <div class="title">Bank</div>
+        <div id="bank" class="mono small">-</div>
+      </div>
+
+      <div class="panel">
+        <div class="title">Suit</div>
+        <div id="suit" class="mono small">-</div>
+      </div>
+
+      <div class="panel">
+        <div class="title">Vault</div>
+        <div id="vault"></div>
+      </div>
+
+      <div class="panel">
+        <div class="title">Inventory</div>
+        <div id="inv"></div>
+      </div>
     </div>
-    <script>
-      async function login() {
-        const password = document.getElementById('password').value;
-        const res = await fetch('/admin/login', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ password })
-        });
-        const data = await res.json();
-        if (data.ok) window.location.href = '/admin/playerdata';
-        else document.getElementById('error').textContent = '❌ Password incorrect';
-      }
-    </script>
-  </body>
-  </html>
-  `);
-});
-
-app.post("/admin/login", (req, res) => {
-  const { password } = req.body;
-  if (password === ADMIN_PASSWORD) {
-    res.cookie("admin_token", ADMIN_TOKEN, { httpOnly: true });
-    return res.json({ ok: true });
-  }
-  return res.json({ ok: false });
-});
-
-function requireAdmin(req, res, next) {
-  const token = req.cookies.admin_token;
-  if (token === ADMIN_TOKEN) next();
-  else res.redirect("/login");
-}
-
-//
-// ==========================
-// 🧭 Dashboard แสดงรูปและชื่อไทย
-// ==========================
-app.get("/admin/playerdata", requireAdmin, async (req, res) => {
-  res.send(`
-  <!DOCTYPE html>
-  <html lang="th">
-  <head>
-    <meta charset="UTF-8">
-    <title>Roblox Player Dashboard</title>
-    <style>
-      body {
-        background: #0f172a;
-        color: white;
-        font-family: 'Segoe UI', sans-serif;
-        padding: 20px;
-      }
-      h1 {
-        text-align: center;
-        color: #38bdf8;
-        margin-bottom: 20px;
-      }
-      #grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-        gap: 15px;
-      }
-      .card {
-        background: #1e293b;
-        border-radius: 12px;
-        padding: 15px;
-        text-align: center;
-        box-shadow: 0 0 10px #0ea5e9;
-        transition: transform 0.2s;
-      }
-      .card:hover { transform: scale(1.03); }
-      .avatar {
-        border-radius: 50%;
-        width: 100px;
-        height: 100px;
-        margin-bottom: 10px;
-        border: 2px solid #38bdf8;
-      }
-      .username { font-size: 18px; color: #f1f5f9; margin-bottom: 5px; }
-      .userid { font-size: 14px; color: #94a3b8; }
-      .updated { font-size: 12px; color: #38bdf8; margin-top: 8px; }
-      .inventory {
-        background: #0f172a;
-        margin-top: 10px;
-        border-radius: 8px;
-        padding: 8px;
-        text-align: left;
-        font-size: 13px;
-        max-height: 160px;
-        overflow-y: auto;
-      }
-      .item {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        margin: 4px 0;
-        color: #cbd5e1;
-      }
-      .item img {
-        width: 28px;
-        height: 28px;
-        border-radius: 6px;
-        margin-right: 6px;
-      }
-      .item span { flex: 1; }
-      .logout {
-        position: fixed;
-        top: 15px;
-        right: 20px;
-        background: #ef4444;
-        border: none;
-        color: white;
-        padding: 8px 14px;
-        border-radius: 6px;
-        cursor: pointer;
-      }
-      .logout:hover { background: #dc2626; }
-    </style>
-  </head>
-  <body>
-    <button class="logout" onclick="logout()">Logout</button>
-    <h1>👥 Roblox Player Dashboard</h1>
-    <div id="grid"></div>
-
-    <script type="module">
-      import { Settings } from '/settings.js';
-      window.Settings = Settings;
-    </script>
 
     <script>
-      async function loadPlayers() {
-        const res = await fetch('/debug/playerdata');
-        const players = await res.json();
-        const grid = document.getElementById('grid');
-        grid.innerHTML = '';
+      const userId = location.pathname.split('/').pop();
 
-        for (const p of players) {
-          const avatarUrl = \`https://www.roblox.com/headshot-thumbnail/image?userId=\${p.user_id}&width=180&height=180&format=png\`;
-          const card = document.createElement('div');
-          card.className = 'card';
+      function rbxHead(u){ 
+        return \`https://www.roblox.com/headshot-thumbnail/image?userId=\${u}&width=180&height=180&format=png\`; 
+      }
 
-          let invHtml = "";
-          if (p.data && p.data.Inventory) {
-            for (const [name, val] of Object.entries(p.data.Inventory)) {
-              const item = window.Settings?.[name];
-              const img = item?.Image
-                ? item.Image.replace("rbxassetid://", "https://www.roblox.com/asset-thumbnail/image?assetId=")
-                : "https://upload.wikimedia.org/wikipedia/commons/8/89/HD_transparent_picture.png";
-              const displayName = item?.ThaiName || name;
+      function kv(obj){
+        return Object.entries(obj).map(([k,v]) => 
+          \`<div class="row"><span>\${k}</span><span>\${v}</span></div>\`
+        ).join('');
+      }
 
-              invHtml += \`
-              <div class='item'>
-                <img src="\${img}">
-                <span>\${displayName}</span>
-                <b>x\${val}</b>
-              </div>\`;
-            }
-          } else invHtml = "<i style='color:#64748b'>No inventory data</i>";
-
-          card.innerHTML = \`
-            <img class="avatar" src="\${avatarUrl}">
-            <div class="username">\${p.username || 'Unknown'}</div>
-            <div class="userid">UserID: \${p.user_id}</div>
-            <div class="updated">Updated: \${new Date(p.updated_at).toLocaleString()}</div>
-            <div class="inventory">\${invHtml}</div>
-          \`;
-
-          grid.appendChild(card);
+      function renderList(containerId, data){
+        const el = document.getElementById(containerId);
+        if(!data || Object.keys(data).length === 0){
+          el.innerHTML = "<div class='small'>No data</div>";
+          return;
         }
+        el.innerHTML = kv(data);
       }
 
-      function logout() {
-        document.cookie = "admin_token=; Max-Age=0";
-        window.location.href = "/login";
+      async function load(){
+        const res = await fetch('/api/player/' + userId);
+        if(!res.ok){ alert('Player not found'); history.back(); return; }
+        const p = await res.json();
+        const d = p.data || {};
+
+        document.getElementById('avatar').src = rbxHead(p.user_id);
+        document.getElementById('pname').textContent = p.username || 'Unknown';
+        document.getElementById('pid').textContent = 'UserID: ' + p.user_id;
+        document.getElementById('updated').textContent = 'Updated: ' + new Date(p.updated_at).toLocaleString();
+        document.getElementById('head').textContent = (p.username||'Unknown') + ' (UserID: ' + p.user_id + ')';
+
+        document.getElementById('idblock').innerHTML = kv(d.ID || {});
+        document.getElementById('bank').textContent = d.Bank || '-';
+        document.getElementById('suit').innerHTML = kv({
+          SuitP: d.SuitP,
+          SuitS: d.SuitS
+        });
+
+        renderList('vault', d.Vault);
+        renderList('inv', d.Inventory);
       }
 
-      loadPlayers();
-      setInterval(loadPlayers, 30000);
+      load();
     </script>
   </body>
   </html>
   `);
 });
-
-//
-// ==========================
-// 🟢 Server Start
-// ==========================
-app.get("/", (req, res) => res.redirect("/login"));
-app.listen(3000, () => console.log("✅ Server running with full Admin Dashboard on port 3000"));

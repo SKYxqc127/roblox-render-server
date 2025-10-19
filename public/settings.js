@@ -1,5 +1,5 @@
 // settings.js
-window.ITEMS = {
+export const Settings = {
 	"Money": {"ThaiName": "?????????", "Type": "Money","Givable": true,"Usable": false,"Max": Infinity,"Image": "rbxassetid://73807148629877"},
 	"Red Money": {"ThaiName": "????????", "Type": "Economy 2","Givable": true,"Usable": false,"Max": Infinity,"Image": "rbxassetid://95111434930513"},
 	"Watermelon": {"ThaiName": "??????", "Type": "Economy","Givable": true,"Usable": false,"Max": 60,"Image": "rbxassetid://88755204176879"},
