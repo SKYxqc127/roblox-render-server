@@ -115,4 +115,55 @@ app.get("/", (req, res) => {
   res.send("✅ Roblox Render Server (Bank + Customize) running!");
 });
 
+// =========================
+// 📍 Player Position + Health System
+// =========================
+app.post("/save/position", async (req, res) => {
+  const auth = req.headers.authorization;
+  if (auth !== `Bearer ${SECRET_KEY}`)
+    return res.status(403).json({ error: "Forbidden" });
+
+  const { userId, position, health } = req.body;
+  if (!userId || !position || health == null)
+    return res.status(400).json({ error: "Missing data" });
+
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS position_data (
+        user_id BIGINT PRIMARY KEY,
+        x FLOAT,
+        y FLOAT,
+        z FLOAT,
+        health FLOAT DEFAULT 100
+      );
+    `);
+
+    await pool.query(
+      `INSERT INTO position_data (user_id, x, y, z, health)
+       VALUES ($1, $2, $3, $4, $5)
+       ON CONFLICT (user_id)
+       DO UPDATE SET x=EXCLUDED.x, y=EXCLUDED.y, z=EXCLUDED.z, health=EXCLUDED.health;`,
+      [userId, position.x, position.y, position.z, health]
+    );
+
+    console.log(`[POSITION SAVE] ${userId} (${position.x},${position.y},${position.z}) HP:${health}`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[POSITION ERROR]", err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.get("/load/position/:userId", async (req, res) => {
+  const userId = req.params.userId;
+  try {
+    const result = await pool.query("SELECT * FROM position_data WHERE user_id=$1", [userId]);
+    if (result.rows.length > 0) res.json(result.rows[0]);
+    else res.json({});
+  } catch (err) {
+    console.error("[POSITION ERROR]", err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
 app.listen(3000, () => console.log("✅ Server running on port 3000"));
