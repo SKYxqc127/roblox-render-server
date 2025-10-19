@@ -165,5 +165,54 @@ app.get("/load/position/:userId", async (req, res) => {
     res.status(500).json({ error: "Database error" });
   }
 });
+//
+// ========================
+// 💾 Player Data System (Render + Roblox Hybrid)
+// ========================
+app.post("/save/playerdata", async (req, res) => {
+  const auth = req.headers.authorization;
+  if (auth !== `Bearer ${SECRET_KEY}`)
+    return res.status(403).json({ error: "Forbidden" });
+
+  const { userId, data, timestamp } = req.body;
+  if (!userId || !data)
+    return res.status(400).json({ error: "Missing data" });
+
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS player_data (
+        user_id BIGINT PRIMARY KEY,
+        data JSONB,
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+    `);
+
+    await pool.query(
+      `INSERT INTO player_data (user_id, data, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (user_id)
+       DO UPDATE SET data = EXCLUDED.data, updated_at = EXCLUDED.updated_at;`,
+      [userId, data]
+    );
+
+    console.log(`[PLAYER DATA SAVE] ${userId} (${Object.keys(data).length} sections)`);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("[PLAYER DATA ERROR]", err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
+
+app.get("/load/playerdata/:userId", async (req, res) => {
+  const userId = req.params.userId;
+  try {
+    const result = await pool.query("SELECT data FROM player_data WHERE user_id=$1", [userId]);
+    if (result.rows.length > 0) res.json(result.rows[0].data);
+    else res.json({});
+  } catch (err) {
+    console.error("[PLAYER DATA LOAD ERROR]", err);
+    res.status(500).json({ error: "Database error" });
+  }
+});
 
 app.listen(3000, () => console.log("✅ Server running on port 3000"));
