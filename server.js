@@ -28,6 +28,25 @@ async function initTables() {
       data JSONB DEFAULT '{}'::jsonb
     );
   `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS position_data (
+      user_id BIGINT PRIMARY KEY,
+      x FLOAT,
+      y FLOAT,
+      z FLOAT,
+      health FLOAT DEFAULT 100
+    );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS player_data (
+      user_id BIGINT PRIMARY KEY,
+      data JSONB,
+      updated_at TIMESTAMP DEFAULT NOW()
+    );
+  `);
+  console.log("✅ All tables initialized successfully");
 }
 initTables();
 
