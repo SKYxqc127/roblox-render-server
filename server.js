@@ -7,17 +7,17 @@ const app = express();
 app.use(express.json());
 app.use(cookieParser());
 
-const SECRET_KEY = "MySecretKey123"; // สำหรับ Roblox POST
-const ADMIN_PASSWORD = "FujiTownAdmin123"; // ✅ เปลี่ยนรหัสนี้เป็นของคุณเอง
-const ADMIN_TOKEN = "FujiToken@2025"; // ใช้ตรวจ cookie
+const SECRET_KEY = "MySecretKey123"; // ใช้ฝั่ง Roblox
+const ADMIN_PASSWORD = "FujiTownAdmin123"; // ✅ รหัสผ่านสำหรับเข้า Dashboard
+const ADMIN_TOKEN = "FujiToken@2025"; // Token สำหรับ cookie
 
-// ✅ PostgreSQL
+// ✅ PostgreSQL Database
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
 
-// ✅ Setup Tables
+// ✅ Auto-create Table
 async function initTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS player_data (
@@ -33,7 +33,7 @@ initTables();
 
 //
 // ==========================
-// 💾 Player Data API
+// 💾 API สำหรับ Roblox
 // ==========================
 app.post("/save/playerdata", async (req, res) => {
   const auth = req.headers.authorization;
@@ -52,7 +52,6 @@ app.post("/save/playerdata", async (req, res) => {
        DO UPDATE SET username = EXCLUDED.username, data = EXCLUDED.data, updated_at = NOW();`,
       [userId, username || "Unknown", data]
     );
-
     console.log(`[PLAYER DATA SAVE] ${username || "Unknown"} (${userId})`);
     res.json({ ok: true });
   } catch (err) {
@@ -75,7 +74,7 @@ app.get("/debug/playerdata", async (req, res) => {
 
 //
 // ==========================
-// 🔐 Admin Login System
+// 🔐 ระบบล็อกอินแอดมิน
 // ==========================
 app.get("/login", (req, res) => {
   res.send(`
@@ -118,13 +117,8 @@ app.get("/login", (req, res) => {
         cursor: pointer;
         margin-top: 15px;
       }
-      button:hover {
-        background: #0284c7;
-      }
-      .error {
-        color: #f87171;
-        margin-top: 10px;
-      }
+      button:hover { background: #0284c7; }
+      .error { color: #f87171; margin-top: 10px; }
     </style>
   </head>
   <body>
@@ -143,11 +137,8 @@ app.get("/login", (req, res) => {
           body: JSON.stringify({ password })
         });
         const data = await res.json();
-        if (data.ok) {
-          window.location.href = '/admin/playerdata';
-        } else {
-          document.getElementById('error').textContent = '❌ Password incorrect';
-        }
+        if (data.ok) window.location.href = '/admin/playerdata';
+        else document.getElementById('error').textContent = '❌ Password incorrect';
       }
     </script>
   </body>
@@ -160,9 +151,8 @@ app.post("/admin/login", (req, res) => {
   if (password === ADMIN_PASSWORD) {
     res.cookie("admin_token", ADMIN_TOKEN, { httpOnly: true });
     return res.json({ ok: true });
-  } else {
-    return res.json({ ok: false });
   }
+  return res.json({ ok: false });
 });
 
 function requireAdmin(req, res, next) {
@@ -173,7 +163,7 @@ function requireAdmin(req, res, next) {
 
 //
 // ==========================
-// 🧭 Admin Dashboard (Protected)
+// 🧭 Dashboard แสดงรูปและชื่อไทย
 // ==========================
 app.get("/admin/playerdata", requireAdmin, async (req, res) => {
   res.send(`
@@ -196,7 +186,7 @@ app.get("/admin/playerdata", requireAdmin, async (req, res) => {
       }
       #grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
         gap: 15px;
       }
       .card {
@@ -206,46 +196,42 @@ app.get("/admin/playerdata", requireAdmin, async (req, res) => {
         text-align: center;
         box-shadow: 0 0 10px #0ea5e9;
         transition: transform 0.2s;
-        cursor: pointer;
       }
-      .card:hover {
-        transform: scale(1.05);
-      }
+      .card:hover { transform: scale(1.03); }
       .avatar {
         border-radius: 50%;
         width: 100px;
         height: 100px;
         margin-bottom: 10px;
+        border: 2px solid #38bdf8;
       }
-      .username {
-        font-size: 18px;
-        color: #f1f5f9;
-        margin-bottom: 5px;
-      }
-      .userid {
-        font-size: 14px;
-        color: #94a3b8;
-      }
-      .updated {
-        font-size: 12px;
-        color: #38bdf8;
-        margin-top: 8px;
-      }
+      .username { font-size: 18px; color: #f1f5f9; margin-bottom: 5px; }
+      .userid { font-size: 14px; color: #94a3b8; }
+      .updated { font-size: 12px; color: #38bdf8; margin-top: 8px; }
       .inventory {
         background: #0f172a;
         margin-top: 10px;
-        border-radius: 6px;
-        padding: 5px;
+        border-radius: 8px;
+        padding: 8px;
         text-align: left;
         font-size: 13px;
-        max-height: 120px;
+        max-height: 160px;
         overflow-y: auto;
       }
       .item {
         display: flex;
+        align-items: center;
         justify-content: space-between;
+        margin: 4px 0;
         color: #cbd5e1;
       }
+      .item img {
+        width: 28px;
+        height: 28px;
+        border-radius: 6px;
+        margin-right: 6px;
+      }
+      .item span { flex: 1; }
       .logout {
         position: fixed;
         top: 15px;
@@ -265,6 +251,11 @@ app.get("/admin/playerdata", requireAdmin, async (req, res) => {
     <h1>👥 Roblox Player Dashboard</h1>
     <div id="grid"></div>
 
+    <script type="module">
+      import { Settings } from '/settings.js';
+      window.Settings = Settings;
+    </script>
+
     <script>
       async function loadPlayers() {
         const res = await fetch('/debug/playerdata');
@@ -276,12 +267,24 @@ app.get("/admin/playerdata", requireAdmin, async (req, res) => {
           const avatarUrl = \`https://www.roblox.com/headshot-thumbnail/image?userId=\${p.user_id}&width=180&height=180&format=png\`;
           const card = document.createElement('div');
           card.className = 'card';
+
           let invHtml = "";
           if (p.data && p.data.Inventory) {
             for (const [name, val] of Object.entries(p.data.Inventory)) {
-              invHtml += \`<div class='item'><span>\${name}</span><span>\${val}</span></div>\`;
+              const item = window.Settings?.[name];
+              const img = item?.Image
+                ? item.Image.replace("rbxassetid://", "https://www.roblox.com/asset-thumbnail/image?assetId=")
+                : "https://upload.wikimedia.org/wikipedia/commons/8/89/HD_transparent_picture.png";
+              const displayName = item?.ThaiName || name;
+
+              invHtml += \`
+              <div class='item'>
+                <img src="\${img}">
+                <span>\${displayName}</span>
+                <b>x\${val}</b>
+              </div>\`;
             }
-          } else invHtml = "<i>No inventory data</i>";
+          } else invHtml = "<i style='color:#64748b'>No inventory data</i>";
 
           card.innerHTML = \`
             <img class="avatar" src="\${avatarUrl}">
@@ -312,8 +315,5 @@ app.get("/admin/playerdata", requireAdmin, async (req, res) => {
 // ==========================
 // 🟢 Server Start
 // ==========================
-app.get("/", (req, res) => {
-  res.redirect("/login");
-});
-
-app.listen(3000, () => console.log("✅ Server running with Admin Login on port 3000"));
+app.get("/", (req, res) => res.redirect("/login"));
+app.listen(3000, () => console.log("✅ Server running with full Admin Dashboard on port 3000"));
