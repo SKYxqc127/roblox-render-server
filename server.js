@@ -47,134 +47,16 @@ async function initTables() {
     );
   `);
 
-  // ✅ เพิ่มคอลัมน์ username หากยังไม่มี
+  // ✅ เพิ่มคอลัมน์ username ถ้ายังไม่มี
   await pool.query(`ALTER TABLE player_data ADD COLUMN IF NOT EXISTS username TEXT;`);
 
-  console.log("✅ All tables initialized and schema updated successfully");
+  console.log("✅ All tables initialized successfully");
 }
 initTables();
 
 //
 // ========================
-// 💰 Bank System
-// ========================
-app.post("/save", async (req, res) => {
-  const auth = req.headers.authorization;
-  if (auth !== `Bearer ${SECRET_KEY}`) return res.status(403).json({ error: "Forbidden" });
-
-  const { userId, bank } = req.body;
-  if (!userId || bank == null) return res.status(400).json({ error: "Missing data" });
-
-  try {
-    await pool.query(
-      `INSERT INTO bank_data (user_id, bank)
-       VALUES ($1, $2)
-       ON CONFLICT (user_id) DO UPDATE SET bank = EXCLUDED.bank;`,
-      [userId, bank]
-    );
-    console.log(`[BANK SAVE] ${userId} = ${bank}`);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("[DB ERROR]", err);
-    res.status(500).json({ error: "Database error" });
-  }
-});
-
-app.get("/load/:userId", async (req, res) => {
-  const userId = req.params.userId;
-  try {
-    const result = await pool.query("SELECT bank FROM bank_data WHERE user_id=$1", [userId]);
-    if (result.rows.length > 0) res.json({ bank: result.rows[0].bank });
-    else res.json({ bank: 0 });
-  } catch (err) {
-    console.error("[DB ERROR]", err);
-    res.status(500).json({ error: "Database error" });
-  }
-});
-
-//
-// ========================
-// 🧍 Customize System
-// ========================
-app.post("/save/customize", async (req, res) => {
-  const auth = req.headers.authorization;
-  if (auth !== `Bearer ${SECRET_KEY}`) return res.status(403).json({ error: "Forbidden" });
-
-  const { userId, customize } = req.body;
-  if (!userId || !customize) return res.status(400).json({ error: "Missing data" });
-
-  try {
-    await pool.query(
-      `INSERT INTO customize_data (user_id, data)
-       VALUES ($1, $2)
-       ON CONFLICT (user_id) DO UPDATE SET data = EXCLUDED.data;`,
-      [userId, customize]
-    );
-    console.log(`[CUSTOMIZE SAVE] ${userId}`);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("[CUSTOMIZE ERROR]", err);
-    res.status(500).json({ error: "Database error" });
-  }
-});
-
-app.get("/load/customize/:userId", async (req, res) => {
-  const userId = req.params.userId;
-  try {
-    const result = await pool.query("SELECT data FROM customize_data WHERE user_id=$1", [userId]);
-    if (result.rows.length > 0) res.json(result.rows[0].data);
-    else res.json({});
-  } catch (err) {
-    console.error("[CUSTOMIZE ERROR]", err);
-    res.status(500).json({ error: "Database error" });
-  }
-});
-
-//
-// ========================
-// 📍 Player Position + Health System
-// ========================
-app.post("/save/position", async (req, res) => {
-  const auth = req.headers.authorization;
-  if (auth !== `Bearer ${SECRET_KEY}`)
-    return res.status(403).json({ error: "Forbidden" });
-
-  const { userId, position, health } = req.body;
-  if (!userId || !position || health == null)
-    return res.status(400).json({ error: "Missing data" });
-
-  try {
-    await pool.query(
-      `INSERT INTO position_data (user_id, x, y, z, health)
-       VALUES ($1, $2, $3, $4, $5)
-       ON CONFLICT (user_id)
-       DO UPDATE SET x=EXCLUDED.x, y=EXCLUDED.y, z=EXCLUDED.z, health=EXCLUDED.health;`,
-      [userId, position.x, position.y, position.z, health]
-    );
-
-    console.log(`[POSITION SAVE] ${userId} (${position.x},${position.y},${position.z}) HP:${health}`);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error("[POSITION ERROR]", err);
-    res.status(500).json({ error: "Database error" });
-  }
-});
-
-app.get("/load/position/:userId", async (req, res) => {
-  const userId = req.params.userId;
-  try {
-    const result = await pool.query("SELECT * FROM position_data WHERE user_id=$1", [userId]);
-    if (result.rows.length > 0) res.json(result.rows[0]);
-    else res.json({});
-  } catch (err) {
-    console.error("[POSITION ERROR]", err);
-    res.status(500).json({ error: "Database error" });
-  }
-});
-
-//
-// ========================
-// 💾 Player Data System (Render + Roblox Hybrid)
+// 💾 Player Data System
 // ========================
 app.post("/save/playerdata", async (req, res) => {
   const auth = req.headers.authorization;
@@ -194,7 +76,7 @@ app.post("/save/playerdata", async (req, res) => {
       [userId, username || "Unknown", data]
     );
 
-    console.log(`[PLAYER DATA SAVE] ${username || "Unknown"} (${userId}) (${Object.keys(data).length} sections)`);
+    console.log(`[PLAYER DATA SAVE] ${username || "Unknown"} (${userId})`);
     res.json({ ok: true });
   } catch (err) {
     console.error("[PLAYER DATA ERROR]", err);
@@ -216,12 +98,12 @@ app.get("/load/playerdata/:userId", async (req, res) => {
 
 //
 // ========================
-// 🧩 Debug Endpoint – ดูข้อมูลผู้เล่น
+// 🧩 Debug + Admin Dashboard
 // ========================
 app.get("/debug/playerdata", async (req, res) => {
   try {
     const result = await pool.query(
-      "SELECT user_id, username, updated_at, data FROM player_data ORDER BY updated_at DESC LIMIT 20;"
+      "SELECT user_id, username, updated_at FROM player_data ORDER BY updated_at DESC LIMIT 100;"
     );
     res.json(result.rows);
   } catch (err) {
@@ -232,10 +114,119 @@ app.get("/debug/playerdata", async (req, res) => {
 
 //
 // ========================
+// 🖥️ Admin Dashboard Page
+// ========================
+app.get("/admin/playerdata", async (req, res) => {
+  res.send(`
+  <!DOCTYPE html>
+  <html lang="th">
+  <head>
+    <meta charset="UTF-8">
+    <title>Roblox Player Dashboard</title>
+    <style>
+      body {
+        background: #0f172a;
+        color: white;
+        font-family: 'Segoe UI', sans-serif;
+        padding: 20px;
+      }
+      h1 {
+        text-align: center;
+        color: #38bdf8;
+        margin-bottom: 20px;
+      }
+      #grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 15px;
+      }
+      .card {
+        background: #1e293b;
+        border-radius: 12px;
+        padding: 15px;
+        text-align: center;
+        box-shadow: 0 0 10px #0ea5e9;
+        transition: transform 0.2s;
+      }
+      .card:hover {
+        transform: scale(1.05);
+      }
+      .avatar {
+        border-radius: 50%;
+        width: 100px;
+        height: 100px;
+        margin-bottom: 10px;
+      }
+      .username {
+        font-size: 18px;
+        color: #f1f5f9;
+        margin-bottom: 5px;
+      }
+      .userid {
+        font-size: 14px;
+        color: #94a3b8;
+      }
+      .updated {
+        font-size: 12px;
+        color: #38bdf8;
+        margin-top: 8px;
+      }
+      .refresh {
+        background: #0ea5e9;
+        border: none;
+        padding: 10px 20px;
+        color: white;
+        border-radius: 8px;
+        cursor: pointer;
+        display: block;
+        margin: 0 auto 20px auto;
+        font-size: 16px;
+      }
+      .refresh:hover {
+        background: #0284c7;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>👥 Roblox Player Dashboard</h1>
+    <button class="refresh" onclick="loadPlayers()">🔄 Refresh Data</button>
+    <div id="grid"></div>
+
+    <script>
+      async function loadPlayers() {
+        const res = await fetch('/debug/playerdata');
+        const players = await res.json();
+        const grid = document.getElementById('grid');
+        grid.innerHTML = '';
+
+        players.forEach(p => {
+          const avatarUrl = \`https://www.roblox.com/headshot-thumbnail/image?userId=\${p.user_id}&width=180&height=180&format=png\`;
+          const card = document.createElement('div');
+          card.className = 'card';
+          card.innerHTML = \`
+            <img class="avatar" src="\${avatarUrl}" alt="Avatar">
+            <div class="username">\${p.username || 'Unknown'}</div>
+            <div class="userid">UserID: \${p.user_id}</div>
+            <div class="updated">Updated: \${new Date(p.updated_at).toLocaleString()}</div>
+          \`;
+          grid.appendChild(card);
+        });
+      }
+
+      loadPlayers();
+      setInterval(loadPlayers, 30000); // รีเฟรชทุก 30 วิ
+    </script>
+  </body>
+  </html>
+  `);
+});
+
+//
+// ========================
 // 🟢 Server Start
 // ========================
 app.get("/", (req, res) => {
-  res.send("✅ Roblox Render Server (Bank + Customize + PlayerData + Position) running!");
+  res.send("✅ Roblox Render Server with Dashboard running!");
 });
 
 app.listen(3000, () => console.log("✅ Server running on port 3000"));
