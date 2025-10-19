@@ -1,19 +1,23 @@
 import express from "express";
 import pkg from "pg";
+import cookieParser from "cookie-parser";
 const { Pool } = pkg;
 
 const app = express();
 app.use(express.json());
+app.use(cookieParser());
 
-const SECRET_KEY = "MySecretKey123";
+const SECRET_KEY = "MySecretKey123"; // สำหรับ Roblox POST
+const ADMIN_PASSWORD = "FujiTownAdmin123"; // ✅ เปลี่ยนรหัสนี้เป็นของคุณเอง
+const ADMIN_TOKEN = "FujiToken@2025"; // ใช้ตรวจ cookie
 
-// ✅ เชื่อมต่อ PostgreSQL
+// ✅ PostgreSQL
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
 });
 
-// ✅ สร้างตาราง + เพิ่ม column อัตโนมัติ
+// ✅ Setup Tables
 async function initTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS player_data (
@@ -28,9 +32,9 @@ async function initTables() {
 initTables();
 
 //
-// ========================
-// 💾 Save / Load Player Data
-// ========================
+// ==========================
+// 💾 Player Data API
+// ==========================
 app.post("/save/playerdata", async (req, res) => {
   const auth = req.headers.authorization;
   if (auth !== `Bearer ${SECRET_KEY}`)
@@ -48,6 +52,7 @@ app.post("/save/playerdata", async (req, res) => {
        DO UPDATE SET username = EXCLUDED.username, data = EXCLUDED.data, updated_at = NOW();`,
       [userId, username || "Unknown", data]
     );
+
     console.log(`[PLAYER DATA SAVE] ${username || "Unknown"} (${userId})`);
     res.json({ ok: true });
   } catch (err) {
@@ -56,22 +61,6 @@ app.post("/save/playerdata", async (req, res) => {
   }
 });
 
-app.get("/load/playerdata/:userId", async (req, res) => {
-  const userId = req.params.userId;
-  try {
-    const result = await pool.query("SELECT username, data FROM player_data WHERE user_id=$1", [userId]);
-    if (result.rows.length > 0) res.json(result.rows[0]);
-    else res.json({});
-  } catch (err) {
-    console.error("[PLAYER DATA LOAD ERROR]", err);
-    res.status(500).json({ error: "Database error" });
-  }
-});
-
-//
-// ========================
-// 🧩 Debug API
-// ========================
 app.get("/debug/playerdata", async (req, res) => {
   try {
     const result = await pool.query(
@@ -85,10 +74,108 @@ app.get("/debug/playerdata", async (req, res) => {
 });
 
 //
-// ========================
-// 🖥️ Admin Dashboard
-// ========================
-app.get("/admin/playerdata", async (req, res) => {
+// ==========================
+// 🔐 Admin Login System
+// ==========================
+app.get("/login", (req, res) => {
+  res.send(`
+  <!DOCTYPE html>
+  <html lang="th">
+  <head>
+    <meta charset="UTF-8">
+    <title>Admin Login</title>
+    <style>
+      body {
+        background: #0f172a;
+        color: white;
+        font-family: 'Segoe UI', sans-serif;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        height: 100vh;
+      }
+      .box {
+        background: #1e293b;
+        padding: 30px;
+        border-radius: 12px;
+        box-shadow: 0 0 15px #0ea5e9;
+        text-align: center;
+      }
+      input {
+        padding: 10px;
+        width: 200px;
+        border-radius: 8px;
+        border: none;
+        outline: none;
+        margin-top: 10px;
+      }
+      button {
+        background: #0ea5e9;
+        border: none;
+        color: white;
+        padding: 10px 20px;
+        border-radius: 8px;
+        cursor: pointer;
+        margin-top: 15px;
+      }
+      button:hover {
+        background: #0284c7;
+      }
+      .error {
+        color: #f87171;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="box">
+      <h2>🔐 Admin Login</h2>
+      <input id="password" type="password" placeholder="Enter Admin Password"><br>
+      <button onclick="login()">Login</button>
+      <div class="error" id="error"></div>
+    </div>
+    <script>
+      async function login() {
+        const password = document.getElementById('password').value;
+        const res = await fetch('/admin/login', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ password })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          window.location.href = '/admin/playerdata';
+        } else {
+          document.getElementById('error').textContent = '❌ Password incorrect';
+        }
+      }
+    </script>
+  </body>
+  </html>
+  `);
+});
+
+app.post("/admin/login", (req, res) => {
+  const { password } = req.body;
+  if (password === ADMIN_PASSWORD) {
+    res.cookie("admin_token", ADMIN_TOKEN, { httpOnly: true });
+    return res.json({ ok: true });
+  } else {
+    return res.json({ ok: false });
+  }
+});
+
+function requireAdmin(req, res, next) {
+  const token = req.cookies.admin_token;
+  if (token === ADMIN_TOKEN) next();
+  else res.redirect("/login");
+}
+
+//
+// ==========================
+// 🧭 Admin Dashboard (Protected)
+// ==========================
+app.get("/admin/playerdata", requireAdmin, async (req, res) => {
   res.send(`
   <!DOCTYPE html>
   <html lang="th">
@@ -159,39 +246,24 @@ app.get("/admin/playerdata", async (req, res) => {
         justify-content: space-between;
         color: #cbd5e1;
       }
-      .popup {
-        display: none;
+      .logout {
         position: fixed;
-        top: 0; left: 0;
-        width: 100%; height: 100%;
-        background: rgba(0,0,0,0.6);
-        justify-content: center;
-        align-items: center;
-      }
-      .popup-content {
-        background: #1e293b;
-        padding: 20px;
-        border-radius: 12px;
-        max-width: 600px;
-        max-height: 80%;
-        overflow-y: auto;
-        box-shadow: 0 0 15px #0ea5e9;
-      }
-      .close-btn {
-        float: right;
+        top: 15px;
+        right: 20px;
+        background: #ef4444;
+        border: none;
+        color: white;
+        padding: 8px 14px;
+        border-radius: 6px;
         cursor: pointer;
-        font-weight: bold;
-        color: #f87171;
       }
+      .logout:hover { background: #dc2626; }
     </style>
   </head>
   <body>
+    <button class="logout" onclick="logout()">Logout</button>
     <h1>👥 Roblox Player Dashboard</h1>
     <div id="grid"></div>
-
-    <div id="popup" class="popup" onclick="closePopup(event)">
-      <div class="popup-content" id="popupContent"></div>
-    </div>
 
     <script>
       async function loadPlayers() {
@@ -204,7 +276,6 @@ app.get("/admin/playerdata", async (req, res) => {
           const avatarUrl = \`https://www.roblox.com/headshot-thumbnail/image?userId=\${p.user_id}&width=180&height=180&format=png\`;
           const card = document.createElement('div');
           card.className = 'card';
-          
           let invHtml = "";
           if (p.data && p.data.Inventory) {
             for (const [name, val] of Object.entries(p.data.Inventory)) {
@@ -213,44 +284,20 @@ app.get("/admin/playerdata", async (req, res) => {
           } else invHtml = "<i>No inventory data</i>";
 
           card.innerHTML = \`
-            <img class="avatar" src="\${avatarUrl}" alt="Avatar">
+            <img class="avatar" src="\${avatarUrl}">
             <div class="username">\${p.username || 'Unknown'}</div>
             <div class="userid">UserID: \${p.user_id}</div>
             <div class="updated">Updated: \${new Date(p.updated_at).toLocaleString()}</div>
             <div class="inventory">\${invHtml}</div>
           \`;
 
-          card.onclick = () => showDetails(p);
           grid.appendChild(card);
         }
       }
 
-      function showDetails(p) {
-        const popup = document.getElementById('popup');
-        const content = document.getElementById('popupContent');
-        content.innerHTML = '<span class="close-btn" onclick="closePopup()">&times;</span>';
-        content.innerHTML += \`<h2>\${p.username || 'Unknown'} (UserID: \${p.user_id})</h2>\`;
-
-        if (!p.data) { content.innerHTML += '<p>No data available</p>'; popup.style.display='flex'; return; }
-
-        for (const [section, values] of Object.entries(p.data)) {
-          content.innerHTML += \`<h3>\${section}</h3><div style="margin-bottom:10px;">\`;
-          if (typeof values === 'object') {
-            for (const [k, v] of Object.entries(values)) {
-              content.innerHTML += \`<div style="color:#94a3b8;">• \${k}: <span style="color:#f8fafc;">\${v}</span></div>\`;
-            }
-          } else {
-            content.innerHTML += \`<div style="color:#f8fafc;">\${values}</div>\`;
-          }
-          content.innerHTML += '</div>';
-        }
-        popup.style.display = 'flex';
-      }
-
-      function closePopup(e) {
-        if (!e || e.target.id === 'popup') {
-          document.getElementById('popup').style.display = 'none';
-        }
+      function logout() {
+        document.cookie = "admin_token=; Max-Age=0";
+        window.location.href = "/login";
       }
 
       loadPlayers();
@@ -262,11 +309,11 @@ app.get("/admin/playerdata", async (req, res) => {
 });
 
 //
-// ========================
+// ==========================
 // 🟢 Server Start
-// ========================
+// ==========================
 app.get("/", (req, res) => {
-  res.send("✅ Roblox Render Server with Player Dashboard running!");
+  res.redirect("/login");
 });
 
-app.listen(3000, () => console.log("✅ Server running on port 3000"));
+app.listen(3000, () => console.log("✅ Server running with Admin Login on port 3000"));
