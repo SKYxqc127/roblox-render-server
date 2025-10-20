@@ -13,12 +13,14 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
 });
 
-// ✅ สร้างตาราง + อัปเดต column อัตโนมัติ
+// ✅ สร้างตาราง + เพิ่ม column timestamp ถ้ายังไม่มี
 async function initTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS bank_data (
       user_id BIGINT PRIMARY KEY,
-      bank INT DEFAULT 0
+      bank INT DEFAULT 0,
+      session_id TEXT,
+      updated_at TIMESTAMP DEFAULT NOW()
     );
   `);
 
@@ -42,37 +44,54 @@ async function initTables() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS player_data (
       user_id BIGINT PRIMARY KEY,
+      username TEXT,
       data JSONB,
       updated_at TIMESTAMP DEFAULT NOW()
     );
   `);
 
-  // ✅ เพิ่มคอลัมน์ username หากยังไม่มี
-  await pool.query(`ALTER TABLE player_data ADD COLUMN IF NOT EXISTS username TEXT;`);
-
-  console.log("✅ All tables initialized and schema updated successfully");
+  console.log("✅ Tables initialized and schema updated successfully");
 }
 initTables();
 
 //
 // ========================
-// 💰 Bank System
+// 💰 Bank System (with anti-rollback)
 // ========================
 app.post("/save", async (req, res) => {
   const auth = req.headers.authorization;
-  if (auth !== `Bearer ${SECRET_KEY}`) return res.status(403).json({ error: "Forbidden" });
+  if (auth !== `Bearer ${SECRET_KEY}`)
+    return res.status(403).json({ error: "Forbidden" });
 
-  const { userId, bank } = req.body;
-  if (!userId || bank == null) return res.status(400).json({ error: "Missing data" });
+  const { userId, bank, sessionId, timestamp } = req.body;
+  if (!userId || bank == null)
+    return res.status(400).json({ error: "Missing data" });
+
+  const saveTime = timestamp ? new Date(timestamp * 1000) : new Date();
 
   try {
-    await pool.query(
-      `INSERT INTO bank_data (user_id, bank)
-       VALUES ($1, $2)
-       ON CONFLICT (user_id) DO UPDATE SET bank = EXCLUDED.bank;`,
-      [userId, bank]
+    const existing = await pool.query(
+      "SELECT updated_at FROM bank_data WHERE user_id=$1",
+      [userId]
     );
-    console.log(`[BANK SAVE] ${userId} = ${bank}`);
+
+    if (existing.rows.length > 0) {
+      const lastUpdated = new Date(existing.rows[0].updated_at);
+      if (lastUpdated.getTime() > saveTime.getTime()) {
+        console.warn(`[⏱️ OLD DATA IGNORED] ${userId} tried to save older bank data.`);
+        return res.status(409).json({ error: "Older data ignored" });
+      }
+    }
+
+    await pool.query(
+      `INSERT INTO bank_data (user_id, bank, session_id, updated_at)
+       VALUES ($1, $2, $3, $4)
+       ON CONFLICT (user_id)
+       DO UPDATE SET bank=EXCLUDED.bank, session_id=EXCLUDED.session_id, updated_at=EXCLUDED.updated_at;`,
+      [userId, bank, sessionId || "none", saveTime]
+    );
+
+    console.log(`[BANK SAVE] ${userId} = ${bank} (${sessionId || "no-session"})`);
     res.json({ ok: true });
   } catch (err) {
     console.error("[DB ERROR]", err);
@@ -83,9 +102,12 @@ app.post("/save", async (req, res) => {
 app.get("/load/:userId", async (req, res) => {
   const userId = req.params.userId;
   try {
-    const result = await pool.query("SELECT bank FROM bank_data WHERE user_id=$1", [userId]);
-    if (result.rows.length > 0) res.json({ bank: result.rows[0].bank });
-    else res.json({ bank: 0 });
+    const result = await pool.query(
+      "SELECT bank, updated_at FROM bank_data WHERE user_id=$1",
+      [userId]
+    );
+    if (result.rows.length > 0) res.json(result.rows[0]);
+    else res.json({ bank: 0, updated_at: null });
   } catch (err) {
     console.error("[DB ERROR]", err);
     res.status(500).json({ error: "Database error" });
@@ -98,10 +120,12 @@ app.get("/load/:userId", async (req, res) => {
 // ========================
 app.post("/save/customize", async (req, res) => {
   const auth = req.headers.authorization;
-  if (auth !== `Bearer ${SECRET_KEY}`) return res.status(403).json({ error: "Forbidden" });
+  if (auth !== `Bearer ${SECRET_KEY}`)
+    return res.status(403).json({ error: "Forbidden" });
 
   const { userId, customize } = req.body;
-  if (!userId || !customize) return res.status(400).json({ error: "Missing data" });
+  if (!userId || !customize)
+    return res.status(400).json({ error: "Missing data" });
 
   try {
     await pool.query(
@@ -132,7 +156,7 @@ app.get("/load/customize/:userId", async (req, res) => {
 
 //
 // ========================
-// 📍 Player Position + Health System
+// 📍 Position + Health
 // ========================
 app.post("/save/position", async (req, res) => {
   const auth = req.headers.authorization;
@@ -174,7 +198,7 @@ app.get("/load/position/:userId", async (req, res) => {
 
 //
 // ========================
-// 💾 Player Data System (Render + Roblox Hybrid)
+// 💾 Player Data System
 // ========================
 app.post("/save/playerdata", async (req, res) => {
   const auth = req.headers.authorization;
@@ -194,7 +218,7 @@ app.post("/save/playerdata", async (req, res) => {
       [userId, username || "Unknown", data]
     );
 
-    console.log(`[PLAYER DATA SAVE] ${username || "Unknown"} (${userId}) (${Object.keys(data).length} sections)`);
+    console.log(`[PLAYER DATA SAVE] ${username || "Unknown"} (${userId})`);
     res.json({ ok: true });
   } catch (err) {
     console.error("[PLAYER DATA ERROR]", err);
@@ -216,7 +240,7 @@ app.get("/load/playerdata/:userId", async (req, res) => {
 
 //
 // ========================
-// 🧩 Debug Endpoint – ดูข้อมูลผู้เล่น
+// 🧩 Debug + Dashboard (เหมือนเดิม)
 // ========================
 app.get("/debug/playerdata", async (req, res) => {
   try {
@@ -230,114 +254,6 @@ app.get("/debug/playerdata", async (req, res) => {
   }
 });
 
-//
-// ========================
-// 🖥️ Admin Dashboard (Web Interface)
-// ========================
-app.get("/admin/playerdata", async (req, res) => {
-  res.send(`
-  <!DOCTYPE html>
-  <html>
-  <head>
-    <meta charset="utf-8">
-    <title>Player Dashboard</title>
-    <style>
-      body { background:#0f172a;color:white;font-family:sans-serif;padding:20px; }
-      h1 { color:#38bdf8;text-align:center; }
-      #grid { display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:15px; }
-      .card { background:#1e293b;border-radius:12px;padding:15px;text-align:center;cursor:pointer;transition:transform .2s; }
-      .card:hover{transform:scale(1.05);}
-      .avatar{border-radius:50%;width:100px;height:100px;margin-bottom:10px;}
-      .username{font-size:18px;}
-      .userid{color:#94a3b8;font-size:13px;}
-      .updated{color:#38bdf8;font-size:12px;}
-    </style>
-  </head>
-  <body>
-    <h1>👥 Player Dashboard</h1>
-    <div id="grid"></div>
-    <script>
-      async function load(){
-        const res = await fetch('/debug/playerdata');
-        const players = await res.json();
-        const grid=document.getElementById('grid');
-        grid.innerHTML='';
-        for(const p of players){
-          const card=document.createElement('div');
-          card.className='card';
-          const avatar=\`https://www.roblox.com/headshot-thumbnail/image?userId=\${p.user_id}&width=180&height=180&format=png\`;
-          card.innerHTML=\`
-            <img class="avatar" src="\${avatar}">
-            <div class="username">\${p.username||'Unknown'}</div>
-            <div class="userid">ID: \${p.user_id}</div>
-            <div class="updated">\${new Date(p.updated_at).toLocaleString()}</div>
-          \`;
-          card.onclick=()=>location.href='/admin/player/'+p.user_id;
-          grid.appendChild(card);
-        }
-      }
-      load();
-      setInterval(load,30000);
-    </script>
-  </body>
-  </html>
-  `);
-});
+app.get("/", (req, res) => res.send("✅ Render Server with Anti-Rollback System Active!"));
 
-//
-// ========================
-// 📄 Player Detail Page
-// ========================
-app.get("/admin/player/:userId", async (req, res) => {
-  res.send(`
-  <!doctype html>
-  <html>
-  <head>
-    <meta charset="utf-8"/>
-    <title>Player Detail</title>
-    <style>
-      body{background:#0a0f1f;color:#e2e8f0;font-family:sans-serif;padding:20px;}
-      h1{color:#38bdf8;}
-      .panel{background:#1e293b;border-radius:12px;padding:15px;margin-bottom:15px;}
-      .row{display:flex;justify-content:space-between;color:#cbd5e1;font-size:14px;margin:4px 0;}
-      .small{color:#9fb2cc;font-size:12px;}
-      .avatar{border-radius:50%;width:120px;height:120px;}
-    </style>
-  </head>
-  <body>
-    <a href="/admin/playerdata" style="color:#38bdf8;">← Back</a>
-    <h1 id="pname">Player Detail</h1>
-    <img id="avatar" class="avatar">
-    <div id="updated" class="small"></div>
-    <div id="info"></div>
-    <script>
-      const id=location.pathname.split('/').pop();
-      async function load(){
-        const res=await fetch('/load/playerdata/'+id);
-        if(!res.ok)return alert('Player not found');
-        const p=await res.json();
-        document.getElementById('avatar').src=\`https://www.roblox.com/headshot-thumbnail/image?userId=\${id}&width=180&height=180&format=png\`;
-        document.getElementById('pname').textContent=(p.username||'Unknown')+' (UserID: '+id+')';
-        document.getElementById('updated').textContent='Updated: '+new Date().toLocaleString();
-        const d=p.data||{};
-        const info=document.getElementById('info');
-        info.innerHTML='';
-        for(const [section,values] of Object.entries(d)){
-          info.innerHTML+='<div class="panel"><b>'+section+'</b><br>'+
-            Object.entries(values).map(([k,v])=>'<div class="row"><span>'+k+'</span><span>'+v+'</span></div>').join('')+'</div>';
-        }
-      }
-      load();
-    </script>
-  </body>
-  </html>
-  `);
-});
-
-//
-// ========================
-// 🟢 Server Start
-// ========================
-app.get("/", (req, res) => res.redirect("/admin/playerdata"));
-
-app.listen(3000, () => console.log("✅ Server running on port 3000 with dashboard!"));
+app.listen(3000, () => console.log("✅ Server running on port 3000 (Anti-Rollback active)"));
